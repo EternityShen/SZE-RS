@@ -1,5 +1,6 @@
-use std::{collections::HashMap, fs::OpenOptions, io::{Error, Read, Write}, path::PathBuf, sync::{Arc, Mutex}};
-
+use std::{collections::HashMap, fs::OpenOptions, path::PathBuf};
+use std::io::{Error, Read, Write};
+use std::sync::{Arc, Mutex};
 use crate::logger::loghandle::{LogHandle};
 
 
@@ -7,7 +8,7 @@ struct FreqInfo {
     policy_path: PathBuf,
     max_freq_file: PathBuf,
     min_freq_file: PathBuf,
-    freq_list: Vec<usize>
+    freq_list: Vec<i32>
 }
 
 pub struct PolicyInfo {
@@ -33,7 +34,7 @@ impl FreqInfo {
                     Ok(_) => {
                         let freq_list_str = buffer.split_whitespace().collect::<Vec<&str>>();
                         for freq in freq_list_str {
-                            freq_list.push(freq.parse::<usize>().unwrap());
+                            freq_list.push(freq.parse::<i32>().unwrap());
                         } 
                     }
                     Err(e) => {
@@ -58,13 +59,13 @@ impl FreqInfo {
         }
     }
 
-    fn set_max_freq(&self, freq: usize) -> Result<(), Error>{
+    fn set_max_freq(&self, freq: &str) -> Result<(), Error>{
         let result = OpenOptions::new()
                                         .write(true)
                                         .open(&self.max_freq_file);
         match result {
             Ok(mut f) => {
-                f.write_all(format!("{}", freq).as_bytes())?;
+                f.write_all(freq.as_bytes())?;
                 Ok(())
             }
             Err(e) => {
@@ -73,13 +74,13 @@ impl FreqInfo {
         }
     }
 
-    fn set_min_freq(&self, freq: usize) -> Result<(), Error>{
+    fn set_min_freq(&self, freq: &str) -> Result<(), Error>{
         let result = OpenOptions::new()
                                         .write(true)
                                         .open(&self.min_freq_file);
         match result {
             Ok(mut f) => {
-                f.write_all(format!("{}", freq).as_bytes())?;
+                f.write_all(freq.as_bytes())?;
                 Ok(())
             }
             Err(e) => {
@@ -96,11 +97,13 @@ impl PolicyInfo {
         let result = cpufreq_path.read_dir();
         match result {
             Ok(all_dir) => {
+                let mut id = 1;
                 for dir_result in all_dir {
                     match dir_result {
                         Ok(dir) => {
                             let freq_info = FreqInfo::new(& dir.path(), &log_handle);
-                            policy_map.insert(1, freq_info);
+                            policy_map.insert(id, freq_info);
+                            id += 1;
                         }
                         Err(e) => {
                             if let Ok(mut log) = log_handle.lock() {
@@ -123,7 +126,41 @@ impl PolicyInfo {
                 }
                 panic!()
             }
-            
         }
     }
+
+    pub fn set_freq(&self, id: i8, freq: (&str, &str)) -> Result<(), Error> {
+        let option = self.policy_map.get(&id);
+        match option {
+            Some(policy) => {
+                let resutl_max = policy.set_max_freq(freq.0);
+                let resutl_min = policy.set_min_freq(freq.1);
+
+                match (resutl_max ,resutl_min) {
+                    (Ok(_), Ok(_)) => {
+                        Ok(())
+                    }
+
+                    (Err(e), Err(_)) => {
+                        Err(e)
+                    }
+                    (Err(e), Ok(_)) => {
+                        Err(e)
+                    }
+                    (Ok(_), Err(e)) => {
+                        Err(e)
+                    }
+                }
+                
+            }
+            None => {
+                if let Ok(mut log) = self.log_handle.lock() {
+                    log.warn("你试图访问一个不存在的Policy".to_string());
+                    log.error("程序退出".to_string());
+                }
+                panic!()
+            }
+        }
+    }
+    
 }
